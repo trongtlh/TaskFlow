@@ -1,0 +1,5 @@
+{
+  "firestore": {"rules": "firestore.rules"},
+  "functions": [{"source": "functions", "codebase": "taskflow", "runtime": "python312", "ignore": ["venv", ".venv", "__pycache__", "*.pyc", ".env*"]}],
+  "emulators": {"auth": {"port": 9099}, "firestore": {"port": 8080}, "singleProjectMode": true}
+}

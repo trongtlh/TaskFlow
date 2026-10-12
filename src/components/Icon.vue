@@ -1,0 +1,6 @@
+<script setup>
+import { LayoutDashboard, Sun, Columns3, CalendarDays, History, Settings2, Plus, Search, Bell, ChevronDown, ChevronLeft, ChevronRight, ArrowUpRight, List, SlidersHorizontal, MoreHorizontal, X, Check, CheckCheck, Circle, CircleDashed, PauseCircle, Flag, Clock3, MessageSquare, ListChecks, Trash2, RotateCcw, Download, Upload, Cloud, HardDrive, Folder, FolderOpen, LogOut, Mail, ArrowUp, CheckCircle2, Command, Menu, LoaderCircle, Calendar, ShieldCheck } from 'lucide-vue-next'
+defineProps({name:String,size:{type:Number,default:19}})
+const icons={overview:LayoutDashboard,sun:Sun,board:Columns3,calendar:CalendarDays,history:History,settings:Settings2,plus:Plus,search:Search,bell:Bell,down:ChevronDown,left:ChevronLeft,right:ChevronRight,external:ArrowUpRight,list:List,filter:SlidersHorizontal,more:MoreHorizontal,x:X,check:Check,checks:CheckCheck,circle:Circle,progress:CircleDashed,pause:PauseCircle,flag:Flag,clock:Clock3,message:MessageSquare,checklist:ListChecks,trash:Trash2,restore:RotateCcw,download:Download,upload:Upload,cloud:Cloud,disk:HardDrive,folder:Folder,folderopen:FolderOpen,logout:LogOut,mail:Mail,up:ArrowUp,success:CheckCircle2,command:Command,menu:Menu,loading:LoaderCircle,date:Calendar,shield:ShieldCheck}
+</script>
+<template><component :is="icons[name] || Circle" :size="size" :stroke-width="1.7" aria-hidden="true" /></template>

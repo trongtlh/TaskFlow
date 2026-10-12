@@ -1,0 +1,14 @@
+node_modules/
+dist/
+release/
+backend-dist/
+build/
+*.spec
+!taskflow-api.spec
+__pycache__/
+*.pyc
+.venv/
+.env
+*.db
+*.db-*
+*.log

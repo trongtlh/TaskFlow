@@ -1,0 +1,190 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner(uid) { return request.auth != null && request.auth.uid == uid; }
+    function migration(uid) {
+      return !exists(/databases/$(database)/documents/users/$(uid)/meta/migration)
+        && existsAfter(/databases/$(database)/documents/users/$(uid)/meta/migration)
+        && getAfter(/databases/$(database)/documents/users/$(uid)/meta/migration).data.completed_at == request.time;
+    }
+    function validTask(d) {
+      return d.keys().hasOnly(['id','title','description','status','priority','project','start_date','due_date','today','checklist','created_at','updated_at','deleted_at','version','last_event_id'])
+        && d.id is int && d.id > 0
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+        && d.description is string && d.description.size() <= 15000
+        && d.project is string && d.project.size() > 0 && d.project.size() <= 80
+        && d.status in ['todo','doing','blocked','done','cancelled']
+        && d.priority in ['low','medium','high','urgent']
+        && (d.start_date == null || (d.start_date is string && d.start_date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        && (d.due_date == null || (d.due_date is string && d.due_date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        && (d.start_date == null || d.due_date == null || d.start_date <= d.due_date)
+        && d.today is bool && d.checklist is list && d.checklist.size() <= 100
+        && d.created_at is timestamp && d.updated_at == request.time
+        && (d.deleted_at == null || d.deleted_at is timestamp)
+        && d.version is int && d.last_event_id is string;
+    }
+    function taskAudit(uid,d) {
+      let e = getAfter(/databases/$(database)/documents/users/$(uid)/events/$(d.last_event_id)).data;
+      return e.actor_uid == uid && e.task_id == d.id && e.task_version == d.version && e.created_at == request.time;
+    }
+    // Dữ liệu con của task chỉ được xóa khi task đã nằm trong thùng rác.
+    function taskTrashed(uid, taskId) {
+      return taskId is int
+        && get(/databases/$(database)/documents/users/$(uid)/tasks/$(string(taskId))).data.deleted_at != null;
+    }
+    match /users/{uid} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && request.resource.data.keys().hasOnly(['email','updated_at'])
+        && request.resource.data.email == request.auth.token.email && request.resource.data.updated_at == request.time;
+      match /tasks/{id} {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && validTask(request.resource.data)
+          && request.resource.data.version == 1
+          && (migration(uid) || (request.resource.data.created_at == request.time && request.resource.data.deleted_at == null && taskAudit(uid,request.resource.data)));
+        allow update: if owner(uid) && validTask(request.resource.data)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.created_at == resource.data.created_at
+          && request.resource.data.version == resource.data.version + 1
+          && request.resource.data.last_event_id != resource.data.last_event_id
+          && taskAudit(uid,request.resource.data);
+        allow delete: if owner(uid) && resource.data.deleted_at != null;
+      }
+      match /events/{id} {
+        allow read: if owner(uid);
+        allow create: if owner(uid)
+          && request.resource.data.keys().hasOnly(['task_id','task_title','action','changes','actor_uid','created_at','task_version'])
+          && request.resource.data.actor_uid == uid && request.resource.data.created_at == request.time
+          && request.resource.data.task_title is string && request.resource.data.changes is map
+          && request.resource.data.action in [
+          'created',
+          'updated',
+          'deleted',
+          'restored',
+          'logged',
+          'settings',
+          'imported',
+          'noted'
+        ];
+        allow update: if false;
+        allow delete: if owner(uid) && taskTrashed(uid, resource.data.task_id);
+      }
+      match /notes/{id} {
+        allow read: if owner(uid);
+
+        allow create: if owner(uid)
+          && request.resource.data.keys().hasOnly([
+            'task_id', 'content', 'file_path', 'symbol', 'language',
+            'before', 'after', 'image_path', 'image_name',
+            'images',
+            'actor_uid', 'created_at'
+          ])
+          && request.resource.data.actor_uid == uid
+          && request.resource.data.created_at == request.time
+          && request.resource.data.task_id is int
+
+          && request.resource.data.content is string
+          && request.resource.data.content.size() <= 10000
+
+          && request.resource.data.file_path is string
+          && request.resource.data.file_path.size() <= 500
+
+          && request.resource.data.symbol is string
+          && request.resource.data.symbol.size() <= 200
+
+          && request.resource.data.language is string
+          && request.resource.data.language.size() <= 40
+
+          && request.resource.data.before is string
+          && request.resource.data.before.size() <= 30000
+
+          && request.resource.data.after is string
+          && request.resource.data.after.size() <= 30000
+
+          && request.resource.data.image_name is string
+          && request.resource.data.image_name.size() <= 200
+
+          && request.resource.data.images is list
+          && request.resource.data.images.size() <= 10
+
+          && (
+            request.resource.data.image_path == ''
+            || request.resource.data.image_path ==
+              'users/' + uid + '/task-images/'
+              + string(request.resource.data.task_id) + '/' + id
+          )
+
+          && (
+            request.resource.data.content.size() > 0
+            || request.resource.data.before.size() > 0
+            || request.resource.data.after.size() > 0
+            || request.resource.data.image_path != ''
+            || request.resource.data.images.size() > 0
+          )
+
+          && get(
+            /databases/$(database)/documents/users/$(uid)/tasks/$(string(request.resource.data.task_id))
+          ).data.deleted_at == null
+
+          && getAfter(
+            /databases/$(database)/documents/users/$(uid)/events/$(id)
+          ).data.action == 'noted'
+
+          && getAfter(
+            /databases/$(database)/documents/users/$(uid)/events/$(id)
+          ).data.task_id == request.resource.data.task_id
+
+          && getAfter(
+            /databases/$(database)/documents/users/$(uid)/events/$(id)
+          ).data.created_at == request.time;
+
+        allow update: if false;
+        allow delete: if owner(uid) && taskTrashed(uid, resource.data.task_id);
+      }
+      match /logs/{id} {
+        allow read: if owner(uid);
+        allow create: if owner(uid)
+          && request.resource.data.keys().hasOnly(['id','task_id','content','minutes','work_date','created_at','event_id'])
+          && request.resource.data.id == id && request.resource.data.task_id is int
+          && request.resource.data.content is string && request.resource.data.content.size() > 0 && request.resource.data.content.size() <= 10000
+          && request.resource.data.minutes is int && request.resource.data.minutes >= 1 && request.resource.data.minutes <= 1440
+          && request.resource.data.work_date is string && request.resource.data.work_date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.created_at == request.time
+          && (migration(uid) || (
+            get(/databases/$(database)/documents/users/$(uid)/tasks/$(string(request.resource.data.task_id))).data.deleted_at == null
+            && getAfter(/databases/$(database)/documents/users/$(uid)/events/$(request.resource.data.event_id)).data.action == 'logged'
+            && getAfter(/databases/$(database)/documents/users/$(uid)/events/$(request.resource.data.event_id)).data.task_id == request.resource.data.task_id
+            && getAfter(/databases/$(database)/documents/users/$(uid)/events/$(request.resource.data.event_id)).data.created_at == request.time));
+        allow update: if false;
+        allow delete: if owner(uid) && taskTrashed(uid, resource.data.task_id);
+      }
+      match /settings/preferences {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid)
+          && request.resource.data.keys().hasOnly(['email','reminder_enabled','reminder_hour','utc_offset'])
+          && request.resource.data.email == request.auth.token.email
+          && request.resource.data.reminder_enabled is bool
+          && (!request.resource.data.reminder_enabled || request.auth.token.email_verified == true)
+          && request.resource.data.reminder_hour is int && request.resource.data.reminder_hour >= 0 && request.resource.data.reminder_hour <= 23
+          && request.resource.data.utc_offset is int && request.resource.data.utc_offset >= -720 && request.resource.data.utc_offset <= 840;
+      }
+      match /meta/counter {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && request.resource.data.keys().hasOnly(['value']) && request.resource.data.value is int && request.resource.data.value >= 1;
+        allow update: if owner(uid) && request.resource.data.keys().hasOnly(['value']) && request.resource.data.value == resource.data.value + 1;
+      }
+      match /meta/migration {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && !exists(/databases/$(database)/documents/users/$(uid)/meta/counter)
+          && request.resource.data.keys().hasOnly(['completed_at','task_count']) && request.resource.data.completed_at == request.time
+          && request.resource.data.task_count is int && request.resource.data.task_count > 0;
+      }
+      match /imported_history/{id} {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && migration(uid) && request.resource.data.source == 'sqlite';
+      }
+      match /reminders/{id} { allow read: if owner(uid); allow write: if false; }
+      // v0.1 snapshots remain private and readable. The new app writes normalized records.
+      match /backups/{id} { allow read: if owner(uid); allow write: if false; }
+    }
+  }
+}
